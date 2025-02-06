@@ -1,6 +1,7 @@
+// 根据文件路径获取对应的内容类型（MIME 类型）
 const getContentType = (path: string): string => {
-  const ext = path.split('.').pop()?.toLowerCase() || '';
-  const types: Record<string, string> = {
+  const ext = path.split('.').pop()?.toLowerCase() || ''; // 获取文件扩展名
+  const types: Record<string, string> = { // 定义扩展名与 MIME 类型的映射
     'js': 'application/javascript',
     'css': 'text/css',
     'html': 'text/html',
@@ -10,121 +11,42 @@ const getContentType = (path: string): string => {
     'jpeg': 'image/jpeg',
     'gif': 'image/gif'
   };
-  return types[ext] || 'text/plain';
+  return types[ext] || 'text/plain'; // 如果未找到匹配，则返回默认类型 'text/plain'
 };
 
-async function handleWebSocket(req: Request): Promise<Response> {
-  const { socket: clientWs, response } = Deno.upgradeWebSocket(req);
-  
-  const url = new URL(req.url);
-  const targetUrl = `wss://generativelanguage.googleapis.com${url.pathname}${url.search}`;
-  
-  console.log('Target URL:', targetUrl);
-  
-  const pendingMessages: string[] = [];
-  const targetWs = new WebSocket(targetUrl);
-  
-  targetWs.onopen = () => {
-    console.log('Connected to Gemini');
-    pendingMessages.forEach(msg => targetWs.send(msg));
-    pendingMessages.length = 0;
-  };
-
-  clientWs.onmessage = (event) => {
-    console.log('Client message received');
-    if (targetWs.readyState === WebSocket.OPEN) {
-      targetWs.send(event.data);
-    } else {
-      pendingMessages.push(event.data);
-    }
-  };
-
-  targetWs.onmessage = (event) => {
-    console.log('Gemini message received');
-    if (clientWs.readyState === WebSocket.OPEN) {
-      clientWs.send(event.data);
-    }
-  };
-
-  clientWs.onclose = (event) => {
-    console.log('Client connection closed');
-    if (targetWs.readyState === WebSocket.OPEN) {
-      targetWs.close(1000, event.reason);
-    }
-  };
-
-  targetWs.onclose = (event) => {
-    console.log('Gemini connection closed');
-    if (clientWs.readyState === WebSocket.OPEN) {
-      clientWs.close(event.code, event.reason);
-    }
-  };
-
-  targetWs.onerror = (error) => {
-    console.error('Gemini WebSocket error:', error);
-  };
-
-  return response;
-}
-
-async function handleAPIRequest(req: Request): Promise<Response> {
-  try {
-    const worker = await import('./api_proxy/worker.mjs');
-    return await worker.default.fetch(req);
-  } catch (error) {
-    console.error('API request error:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-    const errorStatus = (error as { status?: number }).status || 500;
-    return new Response(errorMessage, {
-      status: errorStatus,
-      headers: {
-        'content-type': 'text/plain;charset=UTF-8',
-      }
-    });
-  }
-}
-
+// 处理静态文件请求
 async function handleRequest(req: Request): Promise<Response> {
-  const url = new URL(req.url);
+  const url = new URL(req.url); // 解析请求 URL
   console.log('Request URL:', req.url);
 
-  // WebSocket 处理
-  if (req.headers.get("Upgrade")?.toLowerCase() === "websocket") {
-    return handleWebSocket(req);
-  }
-
-  if (url.pathname.endsWith("/chat/completions") ||
-      url.pathname.endsWith("/embeddings") ||
-      url.pathname.endsWith("/models")) {
-    return handleAPIRequest(req);
-  }
-
-  // 静态文件处理
   try {
-    let filePath = url.pathname;
-    if (filePath === '/' || filePath === '/index.html') {
-      filePath = '/index.html';
+    let filePath = url.pathname; // 获取请求路径
+    if (filePath === '/' || filePath === '/index.html') { // 如果请求路径为根路径或 index.html
+      filePath = '/index.html'; // 将文件路径设置为 index.html
     }
 
-    const fullPath = `${Deno.cwd()}/src/static${filePath}`;
+    const fullPath = `${Deno.cwd()}/src/static${filePath}`; // 构造完整的文件路径
 
-    const file = await Deno.readFile(fullPath);
-    const contentType = getContentType(filePath);
+    const file = await Deno.readFile(fullPath); // 读取文件内容
+    const contentType = getContentType(filePath); // 获取文件的 MIME 类型
 
     return new Response(file, {
       headers: {
-        'content-type': `${contentType};charset=UTF-8`,
+        'content-type': `${contentType};charset=UTF-8`, // 设置响应头的内容类型
       },
     });
   } catch (e) {
-    console.error('Error details:', e);
+    console.error('Error details:', e); // 捕获并打印错误
     return new Response('Not Found', { 
-      status: 404,
+      status: 404, // 如果文件未找到，返回 404 状态码
       headers: {
-        'content-type': 'text/plain;charset=UTF-8',
+        'content-type': 'text/plain;charset=UTF-8', // 设置响应头的内容类型为纯文本
       }
     });
   }
 }
 
-Deno.serve(handleRequest); 
+// 启动 HTTP 服务器
+addEventListener("fetch", (event) => {
+  event.respondWith(handleRequest(event.request)); // 将请求交给 handleRequest 处理
+});
